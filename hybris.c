@@ -648,7 +648,9 @@ typedef struct
   const char *on;    // W
   const char *off;   // W
   const char *blink; // W
+  const char *ramp;  // W
   int         maxval;// value to use if max path is NULL
+  int         rampval;
 } led_paths_vanilla_t;
 
 typedef struct
@@ -695,6 +697,7 @@ led_state_vanilla_probe(led_state_vanilla_t *self,
                         const led_paths_vanilla_t *path)
 {
   bool res = false;
+  int fd_ramp;
 
   led_state_vanilla_close(self);
 
@@ -732,6 +735,16 @@ led_state_vanilla_probe(led_state_vanilla_t *self,
   // having "blink" control file is optional
   led_util_open_file(&self->fd_blink, path->blink);
 
+  // pwm ramp value is optional and is set once at start
+  if ( path->ramp )
+  {
+    if ( led_util_open_file(&fd_ramp, path->ramp) )
+    {
+      dprintf(fd_ramp, "%d", path->rampval);
+      led_util_close_file(&fd_ramp);
+    }
+  }
+
   res = true;
 
 cleanup:
@@ -745,6 +758,25 @@ static void
 led_state_vanilla_set_value(led_state_vanilla_t *self,
                             int value)
 {
+  int blink;
+
+  /*
+   * Onyx requires that blink is cleared before setting static brightness
+   * and enabled after setting brightness.
+   * writing blink off will turn led off also from static on
+   * writing brightness after blink, will turn led static on
+   */
+
+  if( self->fd_blink != -1 )
+  {
+    blink = (self->cur_on > 0 && self->cur_off > 0 && value > 0);
+    if( self->cur_blink != blink && !blink )
+    {
+      self->cur_blink = blink;
+      dprintf(self->fd_blink, "%d", blink);
+    }
+  }
+
   if( self->fd_val != -1 )
   {
     value = led_util_scale_value(value, self->maxval);
@@ -758,8 +790,7 @@ led_state_vanilla_set_value(led_state_vanilla_t *self,
 
   if( self->fd_blink != -1 )
   {
-    int blink = (self->cur_on > 0 && self->cur_off > 0);
-    if( self->cur_blink != blink )
+    if( self->cur_blink != blink && blink )
     {
       self->cur_blink = blink;
       dprintf(self->fd_blink, "%d", blink);
@@ -1057,6 +1088,7 @@ typedef enum {
 
   /** Step function used for emulating blinking via sw breathing */
   LED_RAMP_HARD_STEP = 2,
+
 } led_ramp_t;
 
 typedef struct led_control_t led_control_t;
@@ -1352,14 +1384,29 @@ led_control_vanilla_probe(led_control_t *self)
       {
         .val    = "/sys/class/leds/red/brightness",
         .max    = "/sys/class/leds/red/max_brightness",
+        .on     = "/sys/class/leds/red/pause_hi",
+        .off    = "/sys/class/leds/red/pause_lo",
+        .blink  = "/sys/class/leds/red/blink",
+        .ramp   = "/sys/class/leds/red/ramp_step_ms",
+        .rampval = 5,
       },
       {
         .val    = "/sys/class/leds/green/brightness",
         .max    = "/sys/class/leds/green/max_brightness",
+        .on     = "/sys/class/leds/green/pause_hi",
+        .off    = "/sys/class/leds/green/pause_lo",
+        .blink  = "/sys/class/leds/green/blink",
+        .ramp   = "/sys/class/leds/green/ramp_step_ms",
+        .rampval = 5,
       },
       {
         .val    = "/sys/class/leds/blue/brightness",
         .max    = "/sys/class/leds/blue/max_brightness",
+        .on     = "/sys/class/leds/blue/pause_hi",
+        .off    = "/sys/class/leds/blue/pause_lo",
+        .blink  = "/sys/class/leds/blue/blink",
+        .ramp   = "/sys/class/leds/blue/ramp_step_ms",
+        .rampval = 5,
       },
     },
   };
